@@ -2,8 +2,8 @@ import certifi
 from pymongo import MongoClient
 
 uri = "mongodb+srv://hensim97:I6yrc4wEom8ree74@asimgym.hdubeoh.mongodb.net/?retryWrites=true&w=majority&appName=AsimGym"
-client = MongoClient(uri,ssl_ca_certs=certifi.where())
-
+#client = MongoClient(uri,ssl_ca_certs=certifi.where())
+client = MongoClient(uri, ssl_cafile=certifi.where())
 db=client["AsimGym"]
 
 userCollection=db["users"]
