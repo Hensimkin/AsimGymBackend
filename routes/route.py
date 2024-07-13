@@ -6,9 +6,11 @@ from fastapi import APIRouter, HTTPException, requests
 from fastapi.params import Query
 import httpx
 from config.database import userCollection
+from config.database import userConfigurationCollection
 from models.users import User
 from models.userLogin import UserLogin
 from models.emails import Email
+from models.userConfiguration import UserData
 from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
@@ -56,6 +58,7 @@ async def create_user(user: User): #create user
             # user_data["verification_token"] = verification_token
             user_data["verified"] = False #verified means that the user hasnt been verifed his email
             user_data["password"] = hashed_password
+            user_data["started"]=False #if the user configured himself such as weight , height ....
             inserted_user = userCollection.insert_one(user_data)
             semitoken=generate_random_token() #for user verification
             body="here is your verification token "+semitoken
@@ -77,7 +80,7 @@ async def create_user(user: User): #create user
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
 
-@router.post("/api/user/login")
+@router.post("/api/user/login") #login
 async def login_user(user_login: UserLogin):
     try:
         # Check if user exists and password matches
@@ -94,7 +97,7 @@ async def login_user(user_login: UserLogin):
                     "exp": datetime.utcnow() + access_token_expires
                 }
                 access_token = jwt.encode(access_token_payload, SECRET_KEY, algorithm=ALGORITHM)
-                return {"access_token": access_token, "user_name": user_name}
+                return {"message":"true","access_token": access_token, "user_name": user_name}
             else:
                 return {"message":"incorrect password"}
         else:
@@ -132,7 +135,7 @@ def sendEmail(receiver_email, subject, body): #email sender for requests
         server.quit()
 
 
-def generate_random_token():
+def generate_random_token(): #generate random token for user
     # Define the characters to choose from
     characters = string.ascii_letters + string.digits
 
@@ -143,7 +146,7 @@ def generate_random_token():
 
 
 
-@router.post("/api/user/checkverify")
+@router.post("/api/user/checkverify") #checks if the email is verified
 async def login_user(userEmail: Email):
     try:
         # Check if user exists and password matches
@@ -159,7 +162,7 @@ async def login_user(userEmail: Email):
     except Exception as e:
         print(f"Error: {e}")
 
-@router.post("/api/user/verify")
+@router.post("/api/user/verify") #verifiy user
 async def verify_user(userEmail: Email):
     try:
         # Find the user by email
@@ -176,7 +179,7 @@ async def verify_user(userEmail: Email):
         print(f"Error: {e}")
 
 
-@router.post("/api/user/resendMail")
+@router.post("/api/user/resendMail") #resends email
 async def getVerificationCode(userEmail: Email):
     try:
         logger.info('sup')
@@ -246,3 +249,52 @@ async def get_exercises():
             return {"exercises": exercises}
         else:
             raise HTTPException(status_code=response.status_code, detail="Error fetching data from exercise API")
+
+
+
+@router.get("/api/user/getUserName")
+async def get_userName(userEmail: Email):
+    try:
+        username = userCollection.find_one({"email": userEmail})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+
+
+
+@router.post("/api/user/checkstart") #check if the user finished his settings about himself returns true or false
+async def login_user(userEmail: Email):
+    try:
+        # Check if user exists and password matches
+        emailcheck = userCollection.find_one({"email": userEmail.email})
+        if emailcheck:
+            start = emailcheck.get("started")  # Replace "fieldName" with the actual field name you want to access
+            if start==True:
+                return {"msg": "true"}
+            else:
+                return {"msg": "false"}
+        else:
+            return {"msg": "false"}
+    except Exception as e:
+        print(f"Error: {e}")
+
+@router.post("/api/user/userConfiguration")
+async def finishConfiguration(userDetails:UserData):
+    user_dict = userDetails.dict()
+    userConfigurationCollection.insert_one(user_dict)
+    return {"msg": "success"}
+
+
+
+@router.post("/api/user/verifyConfiguration") #verifiy user_configuration
+async def verify_user_Configuration(userEmail: Email):
+    try:
+        user = userCollection.find_one({"email": userEmail.email})
+
+        if user:
+            # Update the 'verified' field to True
+            userCollection.update_one({"_id": user["_id"]}, {"$set": {"started": True}})
+            return {"msg": "success"}
+        else:
+            return {"msg": "failed"}
+    except Exception as e:
+        print(f"Error: {e}")

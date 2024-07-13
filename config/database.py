@@ -6,7 +6,8 @@ client = MongoClient(uri,ssl_ca_certs=certifi.where())
 db=client["AsimGym"]
 
 userCollection=db["users"]
-
+# Reference the userConfiguration collection
+userConfigurationCollection = db["userConfiguration"]
 
 try:
     client.admin.command('ping')
