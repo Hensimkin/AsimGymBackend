@@ -1,3 +1,4 @@
+import json
 import os
 import random
 import string
@@ -7,10 +8,13 @@ from fastapi.params import Query
 import httpx
 from config.database import userCollection
 from config.database import userConfigurationCollection
+from config.database import customExercisesCollection
 from models.users import User
 from models.userLogin import UserLogin
 from models.emails import Email
+from models.line import UpdatedExcersice
 from models.userConfiguration import UserData
+from models.savedExercise import CustomExcersice
 from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
@@ -298,3 +302,68 @@ async def verify_user_Configuration(userEmail: Email):
             return {"msg": "failed"}
     except Exception as e:
         print(f"Error: {e}")
+
+
+@router.post("/api/user/saveExercises") #creating custom excercise with 0 0 0
+async def createCustomExcersice(newExcersice:CustomExcersice):
+    try:
+        # Transform the input data into the desired format
+        exercises_data = {}
+        for exercise in newExcersice.exercises:
+            exercises_data[exercise] = {
+                "reps": 0,
+                "sets": 0,
+                "weight": 0
+            }
+        document=dict()
+        document["name"]=newExcersice.name
+        document["userEmail"]=newExcersice.userEmail
+        document["exercises"]=exercises_data
+
+        customExercisesCollection.insert_one(document)
+
+        return {"message": "Exercise saved successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/user/updateExercises") #updating the excersice
+async def updateCustomExcersice(updatedExcercise:UpdatedExcersice):
+    try:
+        # custom = customExercisesCollection.find_one({"userEmail": updatedExcercise.useremail, "name": updatedExcercise.excersicename})
+        # print(updatedExcercise.payload)
+
+        payload_dict = json.loads(updatedExcercise.payload)
+
+        for exercise_name, details in payload_dict.items():
+            customExercisesCollection.update_one(
+                {"userEmail": updatedExcercise.useremail, "name": updatedExcercise.excersicename},
+                {"$set": {f"exercises.{exercise_name}": details}},
+                upsert=True
+            )
+
+        return {"message": "Exercises updated successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/user/getExcersicesNames") #getting excersices name
+async def getExcerciesNames(email:Email):
+    try:
+        user_exercises = customExercisesCollection.find({"userEmail": email.email})
+
+        exercise_names = []
+        for exercise_doc in user_exercises:
+            exercise_names.append(exercise_doc.get('name'))
+            # for exercise_name in exercise_doc['exercises']:
+            #     exercise_names.append(exercise_name)
+
+        print(exercise_names)
+        return{"exercisenames":exercise_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+

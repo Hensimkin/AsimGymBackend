@@ -9,6 +9,8 @@ userCollection=db["users"]
 # Reference the userConfiguration collection
 userConfigurationCollection = db["userConfiguration"]
 
+customExercisesCollection=db["customExercises"]
+
 try:
     client.admin.command('ping')
     print("Pinged your deployment. You successfully connected to MongoDB!")
