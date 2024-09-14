@@ -30,9 +30,7 @@ import logging
 from fastapi import Body
 logging.basicConfig(level=logging.INFO)# printing
 logger = logging.getLogger(__name__)# printing
-from typing import List
-from models.Exercise import Exercise
-from models.ExercisesResponse import ExercisesResponse
+
 
 from typing import List, Dict, Any
 
