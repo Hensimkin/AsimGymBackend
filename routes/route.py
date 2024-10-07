@@ -3,13 +3,15 @@ import os
 import random
 import string
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, requests
 from fastapi.params import Query
 import httpx
-from config.database import userCollection
+from config.database import userCollection, usersAiCollection
 from config.database import userConfigurationCollection
 from config.database import customExercisesCollection
 from config.database import usersExercisesLogCollection
+from models.ExerciseRating import ExerciseRating
 from models.users import User
 from models.userLogin import UserLogin
 from models.emails import Email
@@ -30,6 +32,8 @@ import logging
 from fastapi import Body
 logging.basicConfig(level=logging.INFO)# printing
 logger = logging.getLogger(__name__)# printing
+from trainersAi import predict_user_cluster
+from firstRecommendation import process_list_and_csv
 
 
 from typing import List, Dict, Any
@@ -283,11 +287,82 @@ async def login_user(userEmail: Email):
     except Exception as e:
         print(f"Error: {e}")
 
+
 @router.post("/api/user/userConfiguration")
-async def finishConfiguration(userDetails:UserData):
+async def finishConfiguration(userDetails: UserData):
     user_dict = userDetails.dict()
+    print(user_dict)
+    # Insert the original user configuration into the database
+
+
+    # Perform the first AI training using the original user_dict
+    firstAiTraining, userCluster = userFirstAiTraining(user_dict)
+
+    print(firstAiTraining)
+    print(userCluster)
+    user_dict['userCluster']=str(userCluster)
     userConfigurationCollection.insert_one(user_dict)
+    # Ensure that the email is added to firstAiTraining
+    firstAiTraining["email"] = user_dict.get("email")
+
+    # Transform the exercise lists into the desired dictionary format for firstAiTraining
+    for key, value in firstAiTraining.items():
+        if isinstance(value, list) and key != 'email':
+            firstAiTraining[key] = {exercise_name: {
+                "reps": "0",
+                "weight": "0",
+                "sets": "0"
+            } for exercise_name in value}
+
+    # Check the modified firstAiTraining structure
+    print("Modified firstAiTraining:", firstAiTraining)
+
+    # Insert the modified firstAiTraining result into the database
+    usersAiCollection.insert_one(firstAiTraining)
+
     return {"msg": "success"}
+
+
+# @router.post("/api/user/userConfiguration")
+# async def finishConfiguration(userDetails: UserData):
+#     try:
+#         user_dict = userDetails.dict()
+#         print(user_dict)
+#
+#         # Transform the exercise data for each category
+#         transformed_data = {}
+#         for category, exercises in user_dict.items():
+#             if category != "email":
+#                 transformed_data[category] = {}
+#                 for exercise in exercises:
+#                     transformed_data[category][exercise] = {
+#                         "reps": "0",
+#                         "weight": "0",
+#                         "sets": "0"
+#                     }
+#
+#         # Create the document to be saved in the database
+#         document = {
+#             "email": user_dict.get("email"),
+#             "exercises": transformed_data
+#         }
+#
+#         # Insert into the user configuration collection
+#         userConfigurationCollection.insert_one(document)
+#
+#         # Prepare and insert AI training data
+#         firstAiTraining = userFirstAiTraining(document)
+#         firstAiTraining["email"] = document["email"]
+#         usersAiCollection.insert_one(firstAiTraining)
+#
+#         print(firstAiTraining)
+#         print("Configuration saved successfully")
+#
+#         return {"msg": "success"}
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
@@ -376,31 +451,79 @@ async def getExcerciesNames(email:Email):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/user/getExerciseProgram")  # Corrected the typo in the endpoint
+# @router.post("/api/user/getExerciseProgram")  # Corrected the typo in the endpoint
+# async def getExerciseProgram(userExercise: UserExcersice):
+#     try:
+#         print(userExercise.excersicename)
+#         user_exercises = customExercisesCollection.find({"userEmail": userExercise.email,"name":userExercise.excersicename})
+#
+#         exercise_details = []
+#         for exercise_doc in user_exercises:
+#             for exercise_name, exercise_info in exercise_doc['exercises'].items():
+#                 exercise_details.append({
+#                     "exercise_name": exercise_name,
+#                     "reps": exercise_info.get("reps"),
+#                     "sets": exercise_info.get("sets"),
+#                     "weight": exercise_info.get("weight")
+#                 })
+#
+#         print(exercise_details)
+#         return {"exerciseProgram": exercise_details}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/user/getExerciseProgram")
 async def getExerciseProgram(userExercise: UserExcersice):
     try:
         print(userExercise.excersicename)
-        user_exercises = customExercisesCollection.find({"userEmail": userExercise.email,"name":userExercise.excersicename})
 
         exercise_details = []
-        for exercise_doc in user_exercises:
-            for exercise_name, exercise_info in exercise_doc['exercises'].items():
-                exercise_details.append({
-                    "exercise_name": exercise_name,
-                    "reps": exercise_info.get("reps"),
-                    "sets": exercise_info.get("sets"),
-                    "weight": exercise_info.get("weight")
-                })
+
+        if userExercise.excersicename == 'AI Exercise':
+            # Search only by email in usersAiCollection
+            user_exercises = usersAiCollection.find({"email": userExercise.email})
+
+            # Iterate through the results to extract exercise information based on the structure
+            for exercise_doc in user_exercises:
+                # Iterate through each key in the document to find exercise information
+                for category, exercises in exercise_doc.items():
+                    # Skip non-exercise fields like '_id' and 'email'
+                    if category not in ['_id', 'email']:
+                        # Iterate through the exercises in this category
+                        for exercise_name, exercise_info in exercises.items():
+                            exercise_details.append({
+                                "exercise_name": exercise_name,
+                                "reps": exercise_info.get("reps", "N/A"),
+                                "sets": exercise_info.get("sets", "N/A"),
+                                "weight": exercise_info.get("weight", "N/A")
+                            })
+
+        else:
+            # Search by email and exercise name in customExercisesCollection
+            user_exercises = customExercisesCollection.find({"userEmail": userExercise.email,"name":userExercise.excersicename})
+
+            for exercise_doc in user_exercises:
+                    for exercise_name, exercise_info in exercise_doc['exercises'].items():
+                        exercise_details.append({
+                            "exercise_name": exercise_name,
+                            "reps": exercise_info.get("reps"),
+                            "sets": exercise_info.get("sets"),
+                            "weight": exercise_info.get("weight")
+                        })
 
         print(exercise_details)
         return {"exerciseProgram": exercise_details}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
 @router.post("/api/user/updateProfile")
 async def updateProfile(updateDetails: UserData):
     try:
         userdetails = userConfigurationCollection.find_one({"email": updateDetails.email})
+        cluster=userdetails["userCluster"]
         if userdetails:
             # Creating the update dictionary excluding email
             update_data = {
@@ -417,6 +540,33 @@ async def updateProfile(updateDetails: UserData):
                 {"email": updateDetails.email},
                 {"$set": update_data}
             )
+
+            user_ai_data = usersAiCollection.find_one({"email": updateDetails.email})
+
+            muscle_groups = [key for key in user_ai_data.keys() if key not in ["email", "_id"]]
+
+
+            new_selected_muscles = updateDetails.selectedMuscles
+
+            muscles_to_keep = [muscle for muscle in muscle_groups if muscle in new_selected_muscles]
+
+            muscles_to_remove = [muscle for muscle in muscle_groups if muscle not in new_selected_muscles]
+
+            if len(muscles_to_remove)>0:
+                for muscle in muscles_to_remove:
+                    usersAiCollection.update_one(
+                        {"email": updateDetails.email},
+                        {"$unset": {muscle: ""}}
+                    )
+
+            if len(muscles_to_keep)>0:
+                new_selected_muscles = [muscle for muscle in new_selected_muscles if muscle not in muscles_to_keep]
+
+
+            if len(new_selected_muscles)!=0:
+                addAi(updateDetails.email, new_selected_muscles,cluster)
+
+
             return {"message": "Profile updated successfully"}
         else:
             return {"message": "User not found"}
@@ -496,3 +646,419 @@ async def forgotPassword(user:UserLogin):
         return {"message": "Password updated successfully"}
     else:
         raise HTTPException(status_code=500, detail="Password update failed")
+
+
+def userFirstAiTraining(userDict):
+    userCluster=predict_user_cluster(userDict["age"],userDict["height"],userDict["weight"],userDict["gender"],userDict["fitnessLevel"])
+    print(userCluster)
+    #recomindationSystem(userDict['selectedMuscles'])
+    userFirstAiProgram=process_list_and_csv(userDict['selectedMuscles'],str(userCluster))
+    return userFirstAiProgram, userCluster
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def recomindationSystem(muscle_groups):
+    exercises_df = pd.read_csv('clustered_exercises.csv')
+
+    # Initialize the recommendations dictionary
+    recommendations = {}
+
+    # For each muscle group, find exercises
+    for muscle in muscle_groups:
+        # Filter exercises that target the given muscle group
+        filtered_exercises = exercises_df[exercises_df['bodyPart'] == muscle]
+
+        # Convert filtered dataframe to a list of dictionaries
+        filtered_exercises = filtered_exercises.to_dict(orient='records')
+
+        # Check the number of available exercises and add to recommendations accordingly
+        if len(filtered_exercises) >= 3:
+            # Get 3 random exercises if available
+            selected_exercises = random.sample(filtered_exercises, 3)
+        elif len(filtered_exercises) > 0:
+            # Not enough exercises for three, add all available exercises
+            selected_exercises = filtered_exercises
+        else:
+            # No exercises available for this muscle group
+            selected_exercises = "No exercises available for this muscle group"
+
+        # Include only necessary fields in the recommendations
+        if isinstance(selected_exercises, list):
+            recommendations[muscle] = [
+                {
+                    "name": exercise["name"],
+                    "id": exercise["id"],
+                    "cluster": exercise["cluster"],
+                    "bodyPart": exercise["bodyPart"]
+                } for exercise in selected_exercises
+            ]
+        else:
+            recommendations[muscle] = selected_exercises
+
+    # Print the recommendations before returning
+    print(recommendations)
+
+    return recommendations
+
+
+@router.post("/api/user/updateAIExercises")
+async def updateCustomExercise(updatedExercise: UpdatedExcersice):
+    try:
+        # Parse the payload into a dictionary
+        payload_dict = json.loads(updatedExercise.payload)
+
+        # Retrieve the user's document
+        user_document = usersAiCollection.find_one({"email": updatedExercise.useremail})
+        print(user_document)
+
+        if not user_document:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Extract keys representing exercise categories, excluding '_id' and 'email'
+        exercise_categories_keys = [
+            key for key in user_document if key not in ["_id", "email"]
+        ]
+
+        print(exercise_categories_keys)
+
+        # Iterate through each exercise in the payload
+        for exercise_name, details in payload_dict.items():
+            # Check which category the exercise belongs to
+            for category in exercise_categories_keys:
+                if exercise_name in user_document[category]:
+                    # Update the specific exercise in the correct category
+                    usersAiCollection.update_one(
+                        {"email": updatedExercise.useremail},
+                        {"$set": {f"{category}.{exercise_name}": details}},
+                    )
+                    print(f"Updated {exercise_name} in {category} with {details}")
+                    break  # Exit loop once the exercise is updated
+
+        return {"message": "Exercises updated successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/user/exerciseRatings")
+async def receive_exercise_ratings(rating: ExerciseRating):
+    try:
+        # Create the document to be inserted
+        rating_data = {
+            "useremail": rating.useremail,
+            "exerciseName": rating.exerciseName,
+            "ratings": rating.ratings,
+            "choices": rating.choices  # Include choices field in the document
+        }
+        print(rating_data)
+
+
+
+        user = userConfigurationCollection.find_one({"email": rating.useremail})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Retrieve the userCluster from the user document
+        user_cluster = user.get("userCluster")
+        if not user_cluster:
+            raise HTTPException(status_code=404, detail="User cluster not found")
+
+
+
+        rating=rating_data["ratings"]
+        print(rating)
+        print(user_cluster)
+        updateClusters(user_cluster,rating)
+        if any(value in [3, 4] for value in rating_data["ratings"].values()):
+            process_exercise_ratings(rating_data['useremail'], rating_data['ratings'], rating_data["choices"])
+        
+
+
+
+        return {"message": "Exercise rating added successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#create a func that will check for each rating what to do
+#if rating is 1 and 2 dont switch 3 and 4 is switch
+
+
+def updateClusters(usercluster, ratings) :
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv('clustered_exercises.csv')
+
+    # Loop through each exercise in the ratings dictionary
+    for exercise, rating in ratings.items():
+        # Check if the exercise exists in the DataFrame
+        if exercise in df['name'].values:
+            # Get the current value in the cluster column for this exercise
+            current_value = df.loc[df['name'] == exercise, usercluster].values[0]
+
+            # Update the value based on the rating
+            if rating == 1:
+                updated_value = current_value + 2
+            elif rating == 2:
+                updated_value = current_value + 1
+            elif rating == 3:
+                # Only subtract 1 if the current value is not 0
+                if current_value != 0:
+                    updated_value = current_value - 1
+                else:
+                    updated_value = current_value  # No change if it's 0
+            elif rating == 4:
+                # Only subtract 2 if the current value is not 0
+                if current_value != 0:
+                    updated_value = current_value - 2
+                else:
+                    updated_value = current_value  # No change if it's 0
+            else:
+                continue  # If the rating is not 1, 2, 3, or 4, skip this exercise
+
+            # Update the DataFrame with the new value
+            df.loc[df['name'] == exercise, usercluster] = updated_value
+
+    # Save the updated DataFrame back to the CSV file
+    df.to_csv('clustered_exercises.csv', index=False)
+    print("Cluster valuesss updated successfully.")
+
+
+def process_exercise_ratings(useremail, ratings, choices):
+    import pandas as pd  # Make sure to import pandas if not already imported
+
+    # Create a result list to store exercises that match the criteria
+    result = []
+    cluster = {}  # Change from list to dict
+
+    # Iterate through the ratings dictionary
+    for exercise, rating in ratings.items():
+        # Check if the rating is 3 and choice is 'Change', or if the rating is 4
+        if (rating == 3 and exercise in choices and choices[exercise] == "Change") or rating == 4:
+            result.append({
+                "exercise": exercise,
+                "rating": rating,
+                "choice": choices.get(exercise, "No choice"),  # Default to 'No choice' if not found in choices
+                "status": f"Rating {rating} and choice {choices.get(exercise, 'No choice')}"
+            })
+
+    print("Result:", result)
+
+
+    #search the body part of each stuff in result
+
+
+
+
+    df = pd.read_csv('clustered_exercises.csv')
+
+    # Iterate through the result list and find the cluster number for each exercise
+    for item in result:
+        exercise_name = item['exercise']
+
+        # Search for the exercise in the DataFrame and get the cluster number and body part
+        cluster_number = df.loc[df['name'] == exercise_name, 'cluster'].values
+        cluster_bodypart = df.loc[df['name'] == exercise_name, 'bodyPart'].values
+
+        # If the exercise is found, add the cluster number to the cluster dict
+        if len(cluster_number) > 0 and len(cluster_bodypart) > 0:
+            body_part = str(cluster_bodypart[0])
+            clust_num = int(cluster_number[0])
+
+            # Initialize the list if the body part is not already in the cluster dict
+            if body_part not in cluster:
+                cluster[body_part] = []
+
+            # Append the cluster number if it's not already in the list to avoid duplicates
+            if clust_num not in cluster[body_part]:
+                cluster[body_part].append(clust_num)
+
+    print("Cluster:", cluster)
+
+    user_document = userConfigurationCollection.find_one({"email": useremail})
+
+    # Check if 'hatedCluster' already exists in the user's document
+    if 'hatedCluster' in user_document:
+        existing_hated_clusters = user_document['hatedCluster']
+
+        # Merge new clusters with existing clusters
+        for body_part, new_clusters in cluster.items():
+            if body_part in existing_hated_clusters:
+                # Append only new clusters, avoiding duplicates
+                combined_clusters = list(set(existing_hated_clusters[body_part] + new_clusters))
+                existing_hated_clusters[body_part] = combined_clusters
+            else:
+                # Add new body part if it doesn't already exist
+                existing_hated_clusters[body_part] = new_clusters
+
+        # Update the user's document with the merged hatedCluster field
+        userConfigurationCollection.update_one(
+            {"email": useremail},  # Filter by user email
+            {"$set": {"hatedCluster": existing_hated_clusters}}  # Set the hatedCluster field
+        )
+    else:
+        # If hatedCluster doesn't exist, set it with the new cluster dict
+        userConfigurationCollection.update_one(
+            {"email": useremail},  # Filter by user email
+            {"$set": {"hatedCluster": cluster}}  # Set the hatedCluster field
+        )
+
+    changeAiExcersice(useremail, cluster, result)
+
+    return result
+
+
+
+def changeAiExcersice(useremail,cluster,deleteList):
+    exercise_names = [item['exercise'] for item in deleteList]
+
+
+
+    for body_part in cluster.keys():
+        # Loop through each exercise name to delete from the current body part
+        for exercise in exercise_names:
+            # Update command to remove the specific exercise from the body part
+            usersAiCollection.update_one(
+                {"email": useremail},  # Filter by email
+                {"$unset": {f"{body_part}.{exercise}": ""}}  # Unset the specific exercise from the body part
+            )
+
+    user = userConfigurationCollection.find_one({"email": useremail})
+
+    hated_cluster = user['hatedCluster']
+
+    newCluster={}
+
+    df = pd.read_csv('clustered_exercises.csv')
+
+    for body_part, exercises in cluster.items():
+        # Count how many exercises are in the array
+        newCluster[body_part] = len(exercises)
+
+    print(newCluster)
+
+    for body_part, count in newCluster.items():
+        print(f"Body part: {body_part}")
+
+        # Get the list of hated clusters for this body part
+        hatedclusters = hated_cluster[body_part]
+
+        # Filter exercises by body part and exclude exercises in the hated clusters
+        valid_exercises = df[(df['bodyPart'] == body_part) & (~df['cluster'].isin(hatedclusters))]
+
+        if not valid_exercises.empty:
+            # Get only the names of the valid exercises
+            exercise_names = valid_exercises['name'].tolist()
+
+            # If the number of valid exercises is less than count, return as many as possible
+            if len(exercise_names) > count:
+                # Randomly select `count` number of exercise names
+                selected_exercises = random.sample(exercise_names, count)
+
+            else:
+                # If fewer exercises than count, return all valid ones
+                selected_exercises = exercise_names
+
+            for exercise in selected_exercises:
+                exercise_data = {
+                    "reps": "0",
+                    "weight": "0",
+                    "sets": "0"
+                }
+
+                # Insert the new exercise into the corresponding body part in MongoDB
+                usersAiCollection.update_one(
+                    {"email": useremail},
+                    {"$set": {f"{body_part}.{exercise}": exercise_data}}  # Add the new exercise under the body part
+                )
+
+            print(f"Selected exercise names for {body_part}: {selected_exercises}")
+        else:
+            print(f"No valid exercises available for {body_part} that aren't in hated clusters.")
+
+
+
+
+
+def addAi(userEmail,bodyparts,cluster):
+    df = pd.read_csv('clustered_exercises.csv')
+    exercise_data = {
+        "reps": "0",
+        "weight": "0",
+        "sets": "0"
+    }
+    user_doc = userConfigurationCollection.find_one({"email": userEmail}, {"hatedCluster"})
+
+    hated_cluster = user_doc.get('hatedCluster', {})
+
+    formatted_cluster = {}
+    for muscle_group, ids in hated_cluster.items():
+        formatted_cluster[muscle_group] = ids
+
+    newEx=[]
+
+    for bodypart in bodyparts:
+        # Filter the dataframe by the body part
+        bodypart_exercises = df[df['bodyPart'] == bodypart]
+
+        # Sort the exercises by the provided cluster number
+        sorted_exercises = bodypart_exercises.sort_values(by=str(cluster), ascending=False)
+
+        # Select the top 3 exercises
+        top_3_exercises = sorted_exercises.head(3)
+
+        # Loop through the top 3 exercises
+        for _, exercise in top_3_exercises.iterrows():
+            exercise_cluster = exercise['cluster']
+            exercise_name = exercise['name']
+
+            # Check if this exercise's cluster is not in the hated cluster
+            if exercise_cluster not in formatted_cluster.get(bodypart, []):
+                newEx.append(exercise_name)
+
+        for ex in newEx:
+            usersAiCollection.update_one(
+                {"email": userEmail},
+                {"$set": {f"{bodypart}.{ex}": exercise_data}})
+        newEx.clear()
+
+
+

@@ -14,6 +14,8 @@ customExercisesCollection=db["customExercises"]
 
 usersExercisesLogCollection=db["usersExercisesLog"]
 
+usersAiCollection=db["usersAiCollection"]
+
 try:
     client.admin.command('ping')
     print("Pinged your deployment. You successfully connected to MongoDB!")
