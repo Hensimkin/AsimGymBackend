@@ -43,3 +43,13 @@ jobs:
     - name: Stop FastAPI Server
       run: |
         pkill -f uvicorn
+
+    - name: Deploy to Render
+      if: success()
+      env:
+        RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      run: |
+        curl -X POST \
+          -H 'Accept: application/json' \
+          -H "Authorization: Bearer $RENDER_API_KEY" \
+          'https://api.render.com/deploy/srv-co1f4jla73kc73cek0rg?key=swtGl3lfvsU'
