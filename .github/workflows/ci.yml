@@ -13,7 +13,7 @@ jobs:
 
     services:
       mongodb:
-        image: mongo:4.4
+        image: mongo:4.4  # Adjust the version if necessary
         ports:
           - 27017:27017
 
@@ -24,7 +24,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'  # Specify your Python version
+        python-version: '3.11'  # Updated to Python 3.11
 
     - name: Install dependencies
       run: |
