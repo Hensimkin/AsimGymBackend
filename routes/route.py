@@ -3,10 +3,11 @@ import os
 import random
 import string
 
+import httpx
 import pandas as pd
 from fastapi import APIRouter, HTTPException, requests
 from fastapi.params import Query
-import httpx
+
 from config.database import userCollection, usersAiCollection
 from config.database import userConfigurationCollection
 from config.database import customExercisesCollection
@@ -156,6 +157,7 @@ def generate_random_token(): #generate random token for user
 
 
 
+
 @router.post("/api/user/checkverify") #checks if the email is verified
 async def login_user(userEmail: Email):
     try:
@@ -190,13 +192,13 @@ async def verify_user(userEmail: Email):
 
 
 @router.post("/api/user/resendMail") #resends email
-async def getVerificationCode(userEmail: Email):
+async def getVerificationCode(email: Email):
     try:
         logger.info('sup')
         semitoken = generate_random_token()
         print(semitoken)
         body = "here is your verification token " + semitoken
-        sendEmail(userEmail.email, "Email verification", body)
+        sendEmail(email.email, "Email verification", body)
         return {"semitoken": semitoken}
     except Exception as e:
         print(f"Error: {e}")
@@ -635,7 +637,7 @@ async def get_exercise_log(email: Email):
 async def forgotPassword(user:UserLogin):
     db_user = userCollection.find_one({"email": user.email})
     if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return {"message": "Email does not exist"}
     hashed_password = pwd_context.hash(user.password)
     result = userCollection.update_one(
         {"email": user.email},
