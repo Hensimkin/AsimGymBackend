@@ -20,7 +20,10 @@ def process_list_and_csv(data_list, number):
             max_value = filtered_exercises[number].max()
 
             # Filter rows where the specified column has the maximum value
-            max_exercises = filtered_exercises[filtered_exercises[number] == max_value]
+            max_exercises = filtered_exercises[(filtered_exercises[number] == max_value) &
+                                               (~filtered_exercises['name'].str.contains(r'v\.\d', case=False,
+                                                                                         na=False))]
+            #max_exercises = filtered_exercises[filtered_exercises[number] == max_value]
 
             # Randomly select up to 3 rows from the filtered DataFrame
             if len(max_exercises) > 3:
