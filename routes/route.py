@@ -1020,7 +1020,7 @@ def changeAiExcersice(useremail,cluster,deleteList):
 
 
 
-def addAi(userEmail,bodyparts,cluster):
+def addAi(userEmail, bodyparts, cluster):
     df = pd.read_csv('clustered_exercises.csv')
     exercise_data = {
         "reps": "0",
@@ -1035,8 +1035,6 @@ def addAi(userEmail,bodyparts,cluster):
     for muscle_group, ids in hated_cluster.items():
         formatted_cluster[muscle_group] = ids
 
-    newEx=[]
-
     for bodypart in bodyparts:
         # Filter the dataframe by the body part
         bodypart_exercises = df[df['bodyPart'] == bodypart]
@@ -1044,23 +1042,29 @@ def addAi(userEmail,bodyparts,cluster):
         # Sort the exercises by the provided cluster number
         sorted_exercises = bodypart_exercises.sort_values(by=str(cluster), ascending=False)
 
-        # Select the top 3 exercises
-        top_3_exercises = sorted_exercises.head(3)
+        # Initialize a list to hold selected exercises
+        selected_exercises = []
 
-        # Loop through the top 3 exercises
-        for _, exercise in top_3_exercises.iterrows():
+        # Iterate over the sorted exercises
+        for _, exercise in sorted_exercises.iterrows():
             exercise_cluster = exercise['cluster']
             exercise_name = exercise['name']
 
             # Check if this exercise's cluster is not in the hated cluster
             if exercise_cluster not in formatted_cluster.get(bodypart, []):
-                newEx.append(exercise_name)
+                selected_exercises.append(exercise_name)
 
-        for ex in newEx:
+            # Break the loop if we have collected 3 exercises
+            if len(selected_exercises) == 3:
+                break
+
+        # Update the database with the selected exercises
+        for ex in selected_exercises:
             usersAiCollection.update_one(
                 {"email": userEmail},
-                {"$set": {f"{bodypart}.{ex}": exercise_data}})
-        newEx.clear()
+                {"$set": {f"{bodypart}.{ex}": exercise_data}}
+            )
+
 
 
 
